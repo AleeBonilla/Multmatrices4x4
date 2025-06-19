@@ -1,0 +1,83 @@
+
+
+ExitProcess proto ; Finalización de proceso
+
+.data
+
+    matriz1 dd  1.0,    2.0,    3.0,    4.0,
+                5.0,    6.0,    7.0,    8.0,
+                9.0,    10.0,   11.0,   12.0,
+                13.0,   14.0,   15.0,   16.0
+
+
+    matriz2 dd  17.0,   18.0,   19.0,   20.0,
+                21.0,   22.0,   23.0,   24.0,
+                25.0,   26.0,   27.0,   28.0,
+                29.0,   30.0,   31.0,   32.0
+
+    matrizRes dd ?
+
+.code
+
+; -> Uso de los registros
+;
+; RCX = puntero al resultado
+; RDX = puntero a matriz1
+; R8  = puntero a matriz2
+; R10 = índice de fila 
+; R11 = índice de columna
+;
+; * R10 y R11 para recorrer matriz1
+; * RAX, R12 y R9 para direccionamientos
+; * XMM0 y XMM1 para resultados intermedios
+; * XMM2 para acumular las filas de la matriz resultante
+
+
+main PROC
+
+    LEA RDX, matriz1   ; Creamos los punteros a las tres matrices
+    LEA R8, matriz2    ;
+    LEA RCX, matrizRes ;
+
+    ciclo1:
+        
+        XOR R11, R11   ; Volvemos a la primera columna de la fila actual
+
+        MOV RAX, R10   ; Calculamos el desplazamiento en matriz1 según la fila actual
+        IMUL RAX, 16   ;
+        MOV R12, RAX   ;
+
+        VXORPS XMM2, XMM2, XMM2 ; Limpiamos el registro acumulador de la fila resultante de matrizRes
+
+        ciclo2:
+
+            MOV RAX, R11 ; Calculamos el desplazamiento en matriz1 según la columna actual
+            IMUL RAX, 4  ;
+            ADD RAX, R12 ; 
+
+            VBROADCASTSS XMM0, REAL4 PTR [RDX + RAX] ; Distribuimos el elemento matriz1[R12][R11]
+
+            MOV R9, R11  ; Calculamos el desplazamiento en matriz2 según la fila actual 
+            SHL R9, 4    ; Equivalente a R9 * 16 (ya que cada fila está separada por 16 bytes)
+
+            VMOVAPS XMM1, [R8 + R9] ; Cargamos en XMM1, la fila correspondiente a la columna en la que nos encontramos
+
+            VMULPS XMM0, XMM0, XMM1 ; matriz1[R10][R11] * matriz2.fila(R11)
+
+            VADDPS XMM2, XMM2, XMM0 ; Acumulamos la fila resultante en XMM2
+
+            INC R11    ; Incrementamos R11 para pasar al siguiente elemento de la fila R10 de matriz1
+            CMP R11, 4 ; Verificamos si recorrimos toda la fila R10 de matriz1
+
+            JNE ciclo2 
+
+        VMOVAPS [RCX + R12], XMM2 ; Movemos la fila resultante a la fila R10 de matrizRes
+        INC R10    ; Incrementamos R10 para pasar a la siguiente fila de matriz1
+        CMP R10, 4 ; Verificamos si recorrimos por completo matriz1
+
+        JNE ciclo1 
+
+    call ExitProcess
+
+main ENDP
+END
