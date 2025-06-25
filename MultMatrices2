@@ -1,9 +1,14 @@
+ExitProcess proto 
+printf proto 
 
-
-ExitProcess proto ; Finalización de proceso
+includelib kernel32.lib
+includelib ucrt.lib 
+; Esta es la Universal C Runtime Library. Proporciona implementaciones de funciones estándar de C, en este caso utilizamos printf
+includelib legacy_stdio_definitions.lib
+; Soporta printf y otras funciones heredadas de stdio.
 
 .data
-
+    ; Declaracion de matrices 4x4
     matriz1 dd  1.0,    2.0,    3.0,    4.0,
                 5.0,    6.0,    7.0,    8.0,
                 9.0,    10.0,   11.0,   12.0,
@@ -15,13 +20,22 @@ ExitProcess proto ; Finalización de proceso
                 25.0,   26.0,   27.0,   28.0,
                 29.0,   30.0,   31.0,   32.0
 
-    matrizRes dd ?
+    matrizRes dd 16 dup(0.0) ; Reserva espacio para 16 floats inicializados a 0.0
+
+    fmt db "%.2f ", 0 ; Formato para imprimir con 2 decimales
+    newline db 0Ah, 0 ; Salto de línea
+    header db "Matriz Resultante:", 0Ah, 0
 
 .code
 
+; --------------------------------------------------
+; main: Realiza la multiplicación de matrices
+; matrizRes = matriz1 x matriz2
+; --------------------------------------------------
+
 ; -> Uso de los registros
 ;
-; RCX = puntero al resultado
+; RSI = puntero al resultado
 ; RDX = puntero a matriz1
 ; R8  = puntero a matriz2
 ; R10 = índice de fila 
@@ -32,29 +46,31 @@ ExitProcess proto ; Finalización de proceso
 ; * XMM0 y XMM1 para resultados intermedios
 ; * XMM2 para acumular las filas de la matriz resultante
 
-
 main PROC
 
     LEA RDX, matriz1   ; Creamos los punteros a las tres matrices
-    LEA R8, matriz2    ;
-    LEA RCX, matrizRes ;
+    LEA R8, matriz2    ; R8 apunta a matriz2
+    LEA RSI, matrizRes ; RSI apunta a matrizRes
+
+    XOR R10, R10  ; R10 = índice de filas (i = 0)
 
     ciclo1:
         
-        XOR R11, R11   ; Volvemos a la primera columna de la fila actual
+        XOR R11, R11   ; R11 = índice de columnas (j = 0)
 
         MOV RAX, R10   ; Calculamos el desplazamiento en matriz1 según la fila actual
-        IMUL RAX, 16   ;
-        MOV R12, RAX   ;
+        IMUL RAX, 16   ; Desplazamiento en bytes (4 floats x 4 bytes)
+        MOV R12, RAX   ; R12 guarda el offset base de la fila actual
 
         VXORPS XMM2, XMM2, XMM2 ; Limpiamos el registro acumulador de la fila resultante de matrizRes
 
         ciclo2:
 
             MOV RAX, R11 ; Calculamos el desplazamiento en matriz1 según la columna actual
-            IMUL RAX, 4  ;
-            ADD RAX, R12 ; 
+            IMUL RAX, 4  ; RAX *= 4 (4 bytes por float)
+            ADD RAX, R12 ; RAX = offset total de matriz1[i][j]
 
+            ; Carga y propaga el valor de matriz1[i][j] a todo XMM0
             VBROADCASTSS XMM0, REAL4 PTR [RDX + RAX] ; Distribuimos el elemento matriz1[R12][R11]
 
             MOV R9, R11  ; Calculamos el desplazamiento en matriz2 según la fila actual 
@@ -71,13 +87,80 @@ main PROC
 
             JNE ciclo2 
 
-        VMOVAPS [RCX + R12], XMM2 ; Movemos la fila resultante a la fila R10 de matrizRes
+        VMOVAPS [RSI + R12], XMM2 ; Movemos la fila resultante a la fila R10 de matrizRes
         INC R10    ; Incrementamos R10 para pasar a la siguiente fila de matriz1
         CMP R10, 4 ; Verificamos si recorrimos por completo matriz1
 
         JNE ciclo1 
 
-    call ExitProcess
+    ; Llamada para imprimir matriz resultante
+    SUB RSP, 40      ; Reserva espacio en la pila para alineación
+    CALL printMatrix ;
+    ADD RSP, 40      ; Limpia la pila
+
+    RET
 
 main ENDP
+
+; --------------------------------------------------
+; printMatrix: Imprime matrizRes en formato 4x4
+; --------------------------------------------------
+
+
+printMatrix PROC
+
+    
+
+
+    SUB RSP, 40 ; Reserva espacio en la pila
+
+    ; Imprimir encabezado
+
+    LEA RCX, header
+    CALL printf
+
+    ; Inicializar contadores
+
+    XOR RBX, RBX ; Índice lineal (0-15)
+    LEA RSI, matrizRes ; RSI apunta a matrizRes
+
+    print_loop:
+
+        ; Cargar el valor float actual desde matrizRes
+
+        MOVSS XMM0, DWORD PTR [RSI + RBX*4]
+
+        ; Convertir de float a double (para printf con %f)
+        CVTSS2SD XMM0, XMM0
+
+        ; Imprimir elemento
+        ; Preparar argumentos para printf
+
+        LEA RCX, fmt        ; Formato de impresión
+        MOVQ RDX, XMM0        ; Cargar valor en RDX (argumento flotante)
+        MOV RAX, 1        ; printf con 1 argumento de punto flotante
+        CALL printf
+
+        ; Verificar si necesitamos nueva línea (cada 4 elementos)
+
+        INC RBX
+        MOV RAX, RBX
+        AND RAX, 3        ; RAX = RBX % 4
+        JNZ no_newline    ; Si no es múltiplo de 4, no imprime nueva línea
+
+        ; Imprimir nueva línea
+
+        LEA RCX, newline
+        CALL printf
+
+        no_newline:
+
+            CMP RBX, 16        ; ¿Imprimió los 16 elementos?
+            JL print_loop
+
+    ADD RSP, 40            ; Restaura pila
+    RET
+
+printMatrix ENDP
+
 END
